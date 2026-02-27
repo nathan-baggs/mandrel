@@ -27,7 +27,7 @@ add_subdirectory(src)
 
 enable_testing()
 include(CTest)
-#add_subdirectory(tests)
+add_subdirectory(tests)
 
 set(CPACK_PACKAGE_NAME "mandrel")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})

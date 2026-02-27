@@ -1,10 +1,14 @@
-add_library(mandrel STATIC
-  main.cpp
+add_library(mandrel INTERFACE)
+
+target_include_directories(mandrel INTERFACE ${PROJECT_SOURCE_DIR}/include)
+
+target_sources(mandrel INTERFACE
+  ${PROJECT_SOURCE_DIR}/include/mandrel/allocators/page_allocator.h
 )
 
 install(TARGETS mandrel DESTINATION bin)
 
-target_compile_options(mandrel PRIVATE
+target_compile_options(mandrel INTERFACE
   -Wall
   -Wextra
   -pedantic
@@ -19,6 +23,6 @@ target_compile_options(mandrel PRIVATE
   -Wvla
   -Wwrite-strings
 )
-target_compile_features(mandrel PUBLIC cxx_std_26)
-target_compile_definitions(mandrel PUBLIC -DNOMINMAX)
-target_link_libraries(mandrel PUBLIC stdc++exp)
+target_compile_features(mandrel INTERFACE cxx_std_26)
+target_compile_definitions(mandrel INTERFACE -DNOMINMAX)
+target_link_libraries(mandrel INTERFACE stdc++exp)
