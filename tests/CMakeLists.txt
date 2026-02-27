@@ -5,6 +5,7 @@ include(GoogleTest)
 mark_as_advanced(BUILD_GMOCK BUILD_GTEST gtest_hide_internal_symbols)
 
 add_executable(unit_tests
+  free_list_allocator_tests.cpp
   page_allocator_tests.cpp
 )
 
