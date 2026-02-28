@@ -7,14 +7,15 @@
 #include <mutex>
 #include <ostream>
 #include <print>
-#include <string_view>
 
 #include <windows.h>
+
+#include "mandrel/containers/string.h"
 
 namespace mandrel
 {
 
-inline auto get_temp(std::string_view filename) -> std::filesystem::path
+inline auto get_temp(StringView filename) -> std::filesystem::path
 {
     char tempPath[MAX_PATH]{};
     ::GetEnvironmentVariableA("TEMP", tempPath, MAX_PATH);
@@ -32,7 +33,8 @@ auto log(std::format_string<T...> fmt, T &&...args) -> void
 
     if (auto file = std::ofstream{log_path, std::ios::app}; file)
     {
-        const auto str = std::format(fmt, std::forward<T>(args)...);
+        auto str = String{};
+        std::format_to(std::back_inserter(str), fmt, std::forward<T>(args)...);
         file << str << std::endl;
     }
 }
