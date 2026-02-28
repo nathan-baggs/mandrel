@@ -1,6 +1,11 @@
+#include <cstddef>
+
+#include <limits>
+#include <processthreadsapi.h>
 #include <windows.h>
 
 #include <d3d9.h>
+#include <psapi.h>
 
 #include <backends/imgui_impl_dx9.h>
 #include <backends/imgui_impl_win32.h>
@@ -8,6 +13,7 @@
 #include <winnt.h>
 
 #include "mandrel/allocators/imgui_allocator.h"
+#include "mandrel/containers/vector.h"
 #include "mandrel/hooks/com_hook.h"
 #include "mandrel/utils.h"
 
@@ -73,8 +79,32 @@ auto orig_wind_proc = ::WNDPROC{};
 
     ::ImGui::DockSpaceOverViewport(0, ::ImGui::GetMainViewport(), ::ImGuiDockNodeFlags_PassthruCentralNode);
 
-    ::ImGui::Begin("Overlay");
-    ::ImGui::Text("Hello from the Hook!");
+    ::ImGui::Begin("Memory Usage");
+
+    static auto memory_samples = mandrel::Vector<float>(1000u);
+
+    auto pmc = ::PROCESS_MEMORY_COUNTERS{};
+    pmc.cb = sizeof(::PROCESS_MEMORY_COUNTERS);
+    mandrel::ensure(
+        ::GetProcessMemoryInfo(::GetCurrentProcess(), &pmc, sizeof(pmc)) == TRUE, "failed to get memory info");
+
+    const auto current_mem_mb = static_cast<float>(pmc.PagefileUsage) / (1024.0f * 1024.0f);
+
+    memory_samples.erase(std::ranges::begin(memory_samples));
+    memory_samples.push_back(current_mem_mb);
+
+    ::ImGui::Text("current: %.2f MB", current_mem_mb);
+
+    ::ImGui::PlotLines(
+        "usage (MB)",
+        memory_samples.data(),
+        memory_samples.size(),
+        0,
+        nullptr,
+        0.0f,
+        std::numeric_limits<float>::max(),
+        ::ImVec2(0, 80.0f));
+
     ::ImGui::End();
 
     ::ImGui::EndFrame();
