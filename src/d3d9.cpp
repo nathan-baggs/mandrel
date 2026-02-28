@@ -2,8 +2,16 @@
 
 #include <d3d9.h>
 
+#include <backends/imgui_impl_dx9.h>
+#include <backends/imgui_impl_win32.h>
+#include <imgui.h>
+#include <winnt.h>
+
+#include "mandrel/allocators/imgui_allocator.h"
 #include "mandrel/hooks/com_hook.h"
 #include "mandrel/utils.h"
+
+LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace
 {
@@ -18,10 +26,60 @@ struct OrigFunc<R(WINAPI *)(H, Tail...)>
 };
 
 auto com_hook = mandrel::COMHook{};
+auto orig_wind_proc = ::WNDPROC{};
+
+::LRESULT WINAPI wind_proc(const ::HWND hWnd, ::UINT uMsg, ::WPARAM wParam, ::LPARAM lParam)
+{
+    if (::ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam))
+    {
+        return true;
+    }
+    return ::CallWindowProc(orig_wind_proc, hWnd, uMsg, wParam, lParam);
+}
 
 ::HRESULT WINAPI IDirect3DDevice9_EndScene_Hook(::PROC orig_func, void *that)
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_EndScene_Hook)>::type;
+
+    [[maybe_unused]] static auto initialised = [that]()
+    {
+        auto *device = reinterpret_cast<::LPDIRECT3DDEVICE9>(that);
+
+        ::ImGui::SetAllocatorFunctions(mandrel::imgui_allocator, mandrel::imgui_deallocator, nullptr);
+
+        auto params = ::D3DDEVICE_CREATION_PARAMETERS{};
+        device->GetCreationParameters(&params);
+        const auto window = params.hFocusWindow;
+
+        orig_wind_proc = reinterpret_cast<::WNDPROC>(
+            ::SetWindowLongPtr(window, GWLP_WNDPROC, reinterpret_cast<::LONG_PTR>(wind_proc)));
+
+        IMGUI_CHECKVERSION();
+        ::ImGui::CreateContext();
+
+        auto &io = ::ImGui::GetIO();
+        io.ConfigFlags |= ::ImGuiConfigFlags_DockingEnable;
+
+        ::ImGui_ImplWin32_Init(window);
+        ::ImGui_ImplDX9_Init(device);
+
+        mandrel::log("imgui initialisation done");
+        return true;
+    }();
+
+    ::ImGui_ImplDX9_NewFrame();
+    ::ImGui_ImplWin32_NewFrame();
+    ::ImGui::NewFrame();
+
+    ::ImGui::DockSpaceOverViewport(0, ::ImGui::GetMainViewport(), ::ImGuiDockNodeFlags_PassthruCentralNode);
+
+    ::ImGui::Begin("Overlay");
+    ::ImGui::Text("Hello from the Hook!");
+    ::ImGui::End();
+
+    ::ImGui::EndFrame();
+    ::ImGui::Render();
+    ::ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
 
     return reinterpret_cast<orig_call_type>(orig_func)(that);
 }
