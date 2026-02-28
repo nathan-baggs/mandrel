@@ -5,6 +5,7 @@ target_include_directories(mandrel INTERFACE ${PROJECT_SOURCE_DIR}/include)
 target_sources(mandrel INTERFACE
   ${PROJECT_SOURCE_DIR}/include/mandrel/allocators/page_allocator.h
   ${PROJECT_SOURCE_DIR}/include/mandrel/allocators/free_list_allocator.h
+  ${PROJECT_SOURCE_DIR}/include/mandrel/allocators/global_allocator.h
 )
 
 install(TARGETS mandrel DESTINATION bin)
