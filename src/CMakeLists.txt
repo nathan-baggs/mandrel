@@ -24,7 +24,14 @@ target_compile_options(mandrel INTERFACE
   -Wvarargs
   -Wvla
   -Wwrite-strings
+  -Wno-cast-function-type
 )
 target_compile_features(mandrel INTERFACE cxx_std_26)
 target_compile_definitions(mandrel INTERFACE -DNOMINMAX)
 target_link_libraries(mandrel INTERFACE stdc++exp)
+
+add_library(d3d9 SHARED
+  d3d9.cpp
+)
+target_link_libraries(d3d9 PRIVATE mandrel)
+set_target_properties(d3d9 PROPERTIES PREFIX "")
