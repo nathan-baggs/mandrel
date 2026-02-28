@@ -32,6 +32,7 @@ target_link_libraries(mandrel INTERFACE stdc++exp)
 
 add_library(d3d9 SHARED
   d3d9.cpp
+  d3d9.def
 )
 target_link_libraries(d3d9 PRIVATE mandrel)
 set_target_properties(d3d9 PROPERTIES PREFIX "")
