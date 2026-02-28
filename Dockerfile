@@ -45,7 +45,7 @@ RUN wget -q https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_VERSION}.tar.xz
         --enable-static \
         --disable-lto \
         --disable-plugins \
-        --disable-multilib \
+        --enable-multilib \
         --disable-nls \
         --disable-werror \
         --with-system-zlib \
@@ -80,7 +80,7 @@ RUN wget -q https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.ta
         --enable-graphite \
         --disable-libstdcxx-pch \
         --disable-libstdcxx-debug \
-        --disable-multilib \
+        --enable-multilib \
         --disable-lto \
         --disable-nls \
         --disable-werror \
@@ -93,21 +93,35 @@ RUN cd mingw-w64 \
         --prefix=/usr/local/x86_64-w64-mingw32 \
         --host=x86_64-w64-mingw32 \
         --enable-wildcard \
-        --disable-lib32 \
+        --enable-lib32 \
         --enable-lib64 \
     && (make || make || make || make) \
     && make install \
     && cd ..
 
 RUN cd mingw-w64 \
-    && ../mingw-w64-v${MINGW_VERSION}/mingw-w64-libraries/winpthreads/configure \
+    && mkdir build-winpthreads-64 && cd build-winpthreads-64 \
+    && ../../mingw-w64-v${MINGW_VERSION}/mingw-w64-libraries/winpthreads/configure \
         --prefix=/usr/local/x86_64-w64-mingw32 \
         --host=x86_64-w64-mingw32 \
         --enable-static \
         --disable-shared \
     && make -j`nproc` \
     && make install \
-    && cd ..
+    && cd .. \
+    && mkdir build-winpthreads-32 && cd build-winpthreads-32 \
+    && ../../mingw-w64-v${MINGW_VERSION}/mingw-w64-libraries/winpthreads/configure \
+        --prefix=/usr/local/x86_64-w64-mingw32 \
+        --libdir=/usr/local/x86_64-w64-mingw32/lib32 \
+        --host=i686-w64-mingw32 \
+        --enable-static \
+        --disable-shared \
+        CC="x86_64-w64-mingw32-gcc -m32" \
+        CXX="x86_64-w64-mingw32-g++ -m32" \
+        RC="x86_64-w64-mingw32-windres -F pe-i386" \
+    && make -j`nproc` \
+    && make install \
+    && cd ../..
 
 RUN cd gcc \
     && make -j`nproc` \

@@ -22,7 +22,9 @@ pack: build
 	docker run --rm -u $(shell id -u):$(shell id -g) -v "$(PWD)":"$(PWD)" -w "$(PWD)/build" custom-mingw64 cpack . -C Debug
 
 sysroot:
-	docker run --rm -v "$(PWD)/sysroot":/out custom-mingw64 bash -c "cp -r /usr/local/x86_64-w64-mingw32/include /out/ && cp -r /usr/local/x86_64-w64-mingw32/include/c++ /out/ || true"
+	docker run --rm -v "$(PWD)/sysroot":/out custom-mingw64 bash -c "\
+		cp -r /usr/local/x86_64-w64-mingw32/include /out/mingw_include && \
+		cp -r /usr/local/lib/gcc/x86_64-w64-mingw32/15.2.0/include /out/gcc_include"
 
 clean:
 	rm -rf build
