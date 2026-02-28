@@ -88,7 +88,7 @@ auto orig_wind_proc = ::WNDPROC{};
     mandrel::ensure(
         ::GetProcessMemoryInfo(::GetCurrentProcess(), &pmc, sizeof(pmc)) == TRUE, "failed to get memory info");
 
-    const auto current_mem_mb = static_cast<float>(pmc.PagefileUsage) / (1024.0f * 1024.0f);
+    const auto current_mem_mb = static_cast<float>(pmc.WorkingSetSize) / (1024.0f * 1024.0f);
 
     memory_samples.erase(std::ranges::begin(memory_samples));
     memory_samples.push_back(current_mem_mb);
@@ -114,6 +114,19 @@ auto orig_wind_proc = ::WNDPROC{};
     return reinterpret_cast<orig_call_type>(orig_func)(that);
 }
 
+::HRESULT WINAPI IDirect3DDevice9_SetStreamSource_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT StreamNumber,
+    ::IDirect3DVertexBuffer9 *pStreamData,
+    ::UINT OffsetInBytes,
+    ::UINT Stride)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_SetStreamSource_hook)>::type;
+
+    return reinterpret_cast<orig_call_type>(orig_func)(that, StreamNumber, pStreamData, OffsetInBytes, Stride);
+}
+
 ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
     ::PROC orig_func,
     void *that,
@@ -131,7 +144,8 @@ auto orig_wind_proc = ::WNDPROC{};
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(
         that, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 
-    com_hook.add_hook(42zu, *ppReturnedDeviceInterface, IDirect3DDevice9_EndScene_Hook);
+    com_hook.add_hook<42zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_EndScene_Hook);
+    com_hook.add_hook<100zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_SetStreamSource_hook);
 
     return res;
 }
@@ -155,7 +169,7 @@ __declspec(dllexport) ::IDirect3D9 *WINAPI Direct3DCreate9(::UINT SDKVersion)
 
     auto *d3d9 = direct_create(SDKVersion);
 
-    com_hook.add_hook(16zu, d3d9, IDirect3D9_CreateDevice_hook);
+    com_hook.add_hook<16zu>(d3d9, IDirect3D9_CreateDevice_hook);
 
     return d3d9;
 }
