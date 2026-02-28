@@ -19,6 +19,13 @@ struct OrigFunc<R(WINAPI *)(H, Tail...)>
 
 auto com_hook = mandrel::COMHook{};
 
+::HRESULT WINAPI IDirect3DDevice9_EndScene_Hook(::PROC orig_func, void *that)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_EndScene_Hook)>::type;
+
+    return reinterpret_cast<orig_call_type>(orig_func)(that);
+}
+
 ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
     ::PROC orig_func,
     void *that,
@@ -33,8 +40,12 @@ auto com_hook = mandrel::COMHook{};
 
     mandrel::log("IDirect3D9::CreateDevice called");
 
-    return reinterpret_cast<orig_call_type>(orig_func)(
+    const auto res = reinterpret_cast<orig_call_type>(orig_func)(
         that, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
+
+    com_hook.add_hook(42zu, *ppReturnedDeviceInterface, IDirect3DDevice9_EndScene_Hook);
+
+    return res;
 }
 
 }
