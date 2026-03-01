@@ -51,6 +51,16 @@ class COMHook
         auto *orig_func = ::PROC{};
 
         {
+            auto lock = std::scoped_lock{mutex};
+            auto hook = std::ranges::find_if(
+                hooks, [com_vtable](const auto &e) { return e.vtable == com_vtable && e.index == Index; });
+            if (hook != std::ranges::cend(hooks))
+            {
+                return;
+            }
+        }
+
+        {
             const auto aw = impl::AutoWritable{com_vtable + Index, sizeof(::PROC *)};
             orig_func = std::exchange(com_vtable[Index], reinterpret_cast<::PROC>(&com_thunk<Index, R, Args...>));
         }
@@ -58,38 +68,33 @@ class COMHook
         {
             auto lock = std::scoped_lock{mutex};
 
-            auto find = std::ranges::find_if(hooks, [obj](const auto &e) { return e.obj == obj && e.index == Index; });
-            if (find == std::ranges::end(hooks))
-            {
-                hooks.push_back(
-                    Hook{
-                        .obj = obj,
-                        .index = Index,
-                        .orig_func = orig_func,
-                        .hook_func = reinterpret_cast<::PROC>(hook),
-                    });
-            }
-            else
-            {
-                find->hook_func = reinterpret_cast<::PROC>(hook);
-            }
+            hooks.push_back(
+                Hook{
+                    .vtable = com_vtable,
+                    .index = Index,
+                    .orig_func = orig_func,
+                    .hook_func = reinterpret_cast<::PROC>(hook),
+                });
         }
 
         mandrel::log(
-            "COM hook installed {} [{}] -> {}", static_cast<void *>(obj), Index, reinterpret_cast<void *>(hook));
+            "COM hook installed {} [{}] -> {}", static_cast<void *>(com_vtable), Index, reinterpret_cast<void *>(hook));
     }
 
   private:
     template <std::size_t Index, class R, class... Args>
     static auto WINAPI com_thunk(void *that, Args... args) -> R
     {
+        auto *com_obj = reinterpret_cast<::PROC **>(that);
+        auto *com_vtable = *com_obj;
+
         Hook h{};
 
         {
             auto lock = std::shared_lock(mutex);
 
-            auto hook =
-                std::ranges::find_if(hooks, [that](const auto &e) { return e.obj == that && e.index == Index; });
+            auto hook = std::ranges::find_if(
+                hooks, [com_vtable](const auto &e) { return e.vtable == com_vtable && e.index == Index; });
             ensure(hook != std::ranges::cend(hooks), "could not find hook");
 
             h = *hook;
@@ -102,7 +107,7 @@ class COMHook
 
     struct Hook
     {
-        void *obj;
+        void *vtable;
         std::size_t index;
         ::PROC orig_func;
         ::PROC hook_func;
