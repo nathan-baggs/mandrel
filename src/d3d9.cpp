@@ -1,10 +1,12 @@
+#include <algorithm>
+#include <atomic>
 #include <cstddef>
-
 #include <limits>
-#include <processthreadsapi.h>
+
 #include <windows.h>
 
 #include <d3d9.h>
+#include <processthreadsapi.h>
 #include <psapi.h>
 
 #include <backends/imgui_impl_dx9.h>
@@ -13,14 +15,56 @@
 #include <winnt.h>
 
 #include "mandrel/allocators/imgui_allocator.h"
+#include "mandrel/containers/sstream.h"
+#include "mandrel/containers/stack_trace.h"
+#include "mandrel/containers/unordered_set.h"
 #include "mandrel/containers/vector.h"
 #include "mandrel/hooks/com_hook.h"
+#include "mandrel/resource_tracker.h"
 #include "mandrel/utils.h"
 
 LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace
 {
+
+auto read_log_tail() -> mandrel::String
+{
+    const auto log_file = ::CreateFileA(
+        mandrel::get_temp("log.txt").string().c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (log_file == INVALID_HANDLE_VALUE)
+    {
+        return "could not open log file";
+    }
+
+    const auto file_size = ::GetFileSize(log_file, nullptr);
+    if (file_size == INVALID_FILE_SIZE)
+    {
+        return "could not get log file size";
+    }
+
+    static constexpr auto max_read_size = 1024u;
+    const auto read_size = std::min<::DWORD>(file_size, max_read_size);
+    if (file_size > 1024u)
+    {
+        ::SetFilePointer(log_file, -static_cast<LONG>(read_size), nullptr, FILE_END);
+    }
+
+    auto buffer = mandrel::String(read_size, '\0');
+    auto bytes_read = ::DWORD{};
+    if (::ReadFile(log_file, buffer.data(), read_size, &bytes_read, nullptr) == FALSE)
+    {
+        return "could not read log file";
+    }
+
+    return buffer;
+}
 
 template <class F>
 struct OrigFunc;
@@ -33,6 +77,11 @@ struct OrigFunc<R(WINAPI *)(H, Tail...)>
 
 auto com_hook = mandrel::COMHook{};
 auto orig_wind_proc = ::WNDPROC{};
+
+auto tracked_vertex_buffers = mandrel::ResourceTracker<void *>{};
+auto tracked_index_buffers = mandrel::ResourceTracker<void *>{};
+auto tracked_textures = mandrel::ResourceTracker<void *>{};
+auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
 
 ::LRESULT WINAPI wind_proc(const ::HWND hWnd, ::UINT uMsg, ::WPARAM wParam, ::LPARAM lParam)
 {
@@ -105,6 +154,15 @@ auto orig_wind_proc = ::WNDPROC{};
         std::numeric_limits<float>::max(),
         ::ImVec2(0, 80.0f));
 
+    ::ImGui::Text("live vertex buffers: %zu", tracked_vertex_buffers.live_count());
+    ::ImGui::Text("live index buffers: %zu", tracked_index_buffers.live_count());
+    ::ImGui::Text("live textures: %zu", tracked_textures.live_count());
+    ::ImGui::Text("live state blocks: %zu", tracked_state_blocks.live_count());
+
+    ::ImGui::End();
+
+    ::ImGui::Begin("Log");
+    ::ImGui::TextUnformatted(read_log_tail().c_str());
     ::ImGui::End();
 
     ::ImGui::EndFrame();
@@ -127,6 +185,167 @@ auto orig_wind_proc = ::WNDPROC{};
     return reinterpret_cast<orig_call_type>(orig_func)(that, StreamNumber, pStreamData, OffsetInBytes, Stride);
 }
 
+::ULONG WINAPI IDirect3DVertexBuffer9_Release_hook(::PROC orig_func, void *that)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DVertexBuffer9_Release_hook)>::type;
+
+    const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
+
+    if (res == 0)
+    {
+        tracked_vertex_buffers.untrack(that);
+        mandrel::log("IDirect3DVertexBuffer9 released {}", that);
+    }
+
+    return res;
+}
+
+::HRESULT WINAPI IDirect3DDevice9_CreateVertexBuffer_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Length,
+    ::DWORD Usage,
+    ::DWORD FVF,
+    ::D3DPOOL Pool,
+    ::IDirect3DVertexBuffer9 **ppVertexBuffer,
+    ::HANDLE *pSharedHandle)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateVertexBuffer_hook)>::type;
+
+    const auto res =
+        reinterpret_cast<orig_call_type>(orig_func)(that, Length, Usage, FVF, Pool, ppVertexBuffer, pSharedHandle);
+
+    mandrel::log("IDirect3DDevice9::CreateVertexBuffer called {}", static_cast<void *>(*ppVertexBuffer));
+
+    com_hook.add_hook<2zu>(*ppVertexBuffer, IDirect3DVertexBuffer9_Release_hook);
+
+    tracked_vertex_buffers.track(*ppVertexBuffer);
+
+    return res;
+}
+
+::ULONG WINAPI IDirect3DIndexBuffer9_Release_hook(::PROC orig_func, void *that)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DIndexBuffer9_Release_hook)>::type;
+
+    const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
+
+    if (res == 0)
+    {
+        if (tracked_index_buffers.untrack(that))
+        {
+            mandrel::log("IDirect3DIndexBuffer9 released {}", that);
+        }
+    }
+
+    return res;
+}
+
+::HRESULT WINAPI IDirect3DDevice9_CreateIndexBuffer_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Length,
+    ::DWORD Usage,
+    ::D3DFORMAT Format,
+    ::D3DPOOL Pool,
+    ::IDirect3DIndexBuffer9 **ppIndexBuffer,
+    ::HANDLE *pSharedHandle)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateIndexBuffer_hook)>::type;
+
+    const auto res =
+        reinterpret_cast<orig_call_type>(orig_func)(that, Length, Usage, Format, Pool, ppIndexBuffer, pSharedHandle);
+
+    mandrel::log("IDirect3DDevice9::CreateIndexBuffer called {}", static_cast<void *>(*ppIndexBuffer));
+
+    com_hook.add_hook<2zu>(*ppIndexBuffer, IDirect3DIndexBuffer9_Release_hook);
+
+    tracked_index_buffers.track(*ppIndexBuffer);
+
+    return res;
+}
+
+::ULONG WINAPI IDirect3DTexture9_Release_hook(::PROC orig_func, void *that)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DTexture9_Release_hook)>::type;
+
+    const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
+
+    if (res == 0)
+    {
+        if (tracked_textures.untrack(that))
+        {
+            mandrel::log("IDirect3DTexture9 released {}", that);
+        }
+    }
+
+    return res;
+}
+
+::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Width,
+    ::UINT Height,
+    ::UINT Levels,
+    ::DWORD Usage,
+    ::D3DFORMAT Format,
+    ::D3DPOOL Pool,
+    ::IDirect3DTexture9 **ppTexture,
+    ::HANDLE *pSharedHandle)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateTexture_hook)>::type;
+
+    const auto res = reinterpret_cast<orig_call_type>(
+        orig_func)(that, Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
+
+    mandrel::log("IDirect3DDevice9::CreateTexture called {}", static_cast<void *>(*ppTexture));
+
+    if (res == S_OK && *ppTexture != nullptr)
+    {
+        tracked_textures.track(*ppTexture);
+        com_hook.add_hook<2zu>(*ppTexture, IDirect3DTexture9_Release_hook);
+    }
+
+    return res;
+}
+
+::HRESULT WINAPI IDirect3DStateBlock9_Release_hook(::PROC orig_func, void *that)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DStateBlock9_Release_hook)>::type;
+
+    const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
+
+    if (res == 0)
+    {
+        if (tracked_state_blocks.untrack(that))
+        {
+            mandrel::log("IDirect3DStateBlock9 released {}", that);
+        }
+    }
+
+    return res;
+}
+
+::HRESULT WINAPI IDirect3DDevice9_CreateStateBlock_hook(
+    ::PROC orig_func,
+    void *that,
+    ::D3DSTATEBLOCKTYPE Type,
+    ::IDirect3DStateBlock9 **ppSB)
+{
+    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateStateBlock_hook)>::type;
+
+    const auto res = reinterpret_cast<orig_call_type>(orig_func)(that, Type, ppSB);
+
+    mandrel::log("IDirect3DDevice9::CreateStateBlock called {}", static_cast<void *>(*ppSB));
+
+    com_hook.add_hook<2zu>(*ppSB, IDirect3DStateBlock9_Release_hook);
+
+    tracked_state_blocks.track(*ppSB);
+
+    return res;
+}
+
 ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
     ::PROC orig_func,
     void *that,
@@ -144,7 +363,11 @@ auto orig_wind_proc = ::WNDPROC{};
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(
         that, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 
+    com_hook.add_hook<23zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_CreateTexture_hook);
+    com_hook.add_hook<26zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_CreateVertexBuffer_hook);
+    com_hook.add_hook<27zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_CreateIndexBuffer_hook);
     com_hook.add_hook<42zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_EndScene_Hook);
+    com_hook.add_hook<60zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_CreateStateBlock_hook);
     com_hook.add_hook<100zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_SetStreamSource_hook);
 
     return res;
