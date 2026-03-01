@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <limits>
 
+#include <utility>
 #include <windows.h>
 
 #include <d3d9.h>
@@ -66,6 +67,26 @@ auto read_log_tail() -> mandrel::String
     return buffer;
 }
 
+auto largest_free_page() -> std::size_t
+{
+    auto largest_size = std::size_t{};
+
+    auto mem_info = ::MEMORY_BASIC_INFORMATION{};
+
+    std::byte *addr = nullptr;
+    while (::VirtualQuery(addr, &mem_info, sizeof(mem_info)) != 0)
+    {
+        if (mem_info.State == MEM_FREE && mem_info.RegionSize > largest_size)
+        {
+            largest_size = mem_info.RegionSize;
+        }
+
+        addr += mem_info.RegionSize;
+    }
+
+    return largest_size;
+}
+
 template <class F>
 struct OrigFunc;
 
@@ -92,7 +113,65 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return ::CallWindowProc(orig_wind_proc, hWnd, uMsg, wParam, lParam);
 }
 
-::HRESULT WINAPI IDirect3DDevice9_EndScene_Hook(::PROC orig_func, void *that)
+}
+
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_EndScene_Hook(::PROC orig_func, void *that);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_SetStreamSource_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT StreamNumber,
+    ::IDirect3DVertexBuffer9 *pStreamData,
+    ::UINT OffsetInBytes,
+    ::UINT Stride);
+__declspec(dllexport) ::ULONG WINAPI IDirect3DVertexBuffer9_Release_hook(::PROC orig_func, void *that);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateVertexBuffer_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Length,
+    ::DWORD Usage,
+    ::DWORD FVF,
+    ::D3DPOOL Pool,
+    ::IDirect3DVertexBuffer9 **ppVertexBuffer,
+    ::HANDLE *pSharedHandle);
+__declspec(dllexport) ::ULONG WINAPI IDirect3DIndexBuffer9_Release_hook(::PROC orig_func, void *that);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateIndexBuffer_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Length,
+    ::DWORD Usage,
+    ::D3DFORMAT Format,
+    ::D3DPOOL Pool,
+    ::IDirect3DIndexBuffer9 **ppIndexBuffer,
+    ::HANDLE *pSharedHandle);
+__declspec(dllexport) ::ULONG WINAPI IDirect3DTexture9_Release_hook(::PROC orig_func, void *that);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Width,
+    ::UINT Height,
+    ::UINT Levels,
+    ::DWORD Usage,
+    ::D3DFORMAT Format,
+    ::D3DPOOL Pool,
+    ::IDirect3DTexture9 **ppTexture,
+    ::HANDLE *pSharedHandle);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DStateBlock9_Release_hook(::PROC orig_func, void *that);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateStateBlock_hook(
+    ::PROC orig_func,
+    void *that,
+    ::D3DSTATEBLOCKTYPE Type,
+    ::IDirect3DStateBlock9 **ppSB);
+__declspec(dllexport) ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
+    ::PROC orig_func,
+    void *that,
+    ::UINT Adapter,
+    ::D3DDEVTYPE DeviceType,
+    ::HWND hFocusWindow,
+    ::DWORD BehaviorFlags,
+    ::D3DPRESENT_PARAMETERS *pPresentationParameters,
+    ::IDirect3DDevice9 **ppReturnedDeviceInterface);
+
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_EndScene_Hook(::PROC orig_func, void *that)
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_EndScene_Hook)>::type;
 
@@ -132,17 +211,18 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
 
     static auto memory_samples = mandrel::Vector<float>(1000u);
 
-    auto pmc = ::PROCESS_MEMORY_COUNTERS{};
-    pmc.cb = sizeof(::PROCESS_MEMORY_COUNTERS);
+    auto statex = ::MEMORYSTATUSEX{};
+    statex.dwLength = sizeof(::MEMORYSTATUSEX);
     mandrel::ensure(
-        ::GetProcessMemoryInfo(::GetCurrentProcess(), &pmc, sizeof(pmc)) == TRUE, "failed to get memory info");
+        ::GlobalMemoryStatusEx(&statex) != FALSE, "failed to get global memory status: {}", ::GetLastError());
 
-    const auto current_mem_mb = static_cast<float>(pmc.WorkingSetSize) / (1024.0f * 1024.0f);
+    const auto current_mem_mb = static_cast<float>(statex.ullAvailVirtual) / (1024.0f * 1024.0f);
 
     memory_samples.erase(std::ranges::begin(memory_samples));
     memory_samples.push_back(current_mem_mb);
 
     ::ImGui::Text("current: %.2f MB", current_mem_mb);
+    ::ImGui::Text("largest free block: %.2f MB", static_cast<float>(largest_free_page()) / (1024.0f * 1024.0f));
 
     ::ImGui::PlotLines(
         "usage (MB)",
@@ -211,7 +291,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return reinterpret_cast<orig_call_type>(orig_func)(that);
 }
 
-::HRESULT WINAPI IDirect3DDevice9_SetStreamSource_hook(
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_SetStreamSource_hook(
     ::PROC orig_func,
     void *that,
     ::UINT StreamNumber,
@@ -224,7 +304,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return reinterpret_cast<orig_call_type>(orig_func)(that, StreamNumber, pStreamData, OffsetInBytes, Stride);
 }
 
-::ULONG WINAPI IDirect3DVertexBuffer9_Release_hook(::PROC orig_func, void *that)
+__declspec(dllexport) ::ULONG WINAPI IDirect3DVertexBuffer9_Release_hook(::PROC orig_func, void *that)
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DVertexBuffer9_Release_hook)>::type;
 
@@ -239,7 +319,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::HRESULT WINAPI IDirect3DDevice9_CreateVertexBuffer_hook(
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateVertexBuffer_hook(
     ::PROC orig_func,
     void *that,
     ::UINT Length,
@@ -254,7 +334,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     const auto res =
         reinterpret_cast<orig_call_type>(orig_func)(that, Length, Usage, FVF, Pool, ppVertexBuffer, pSharedHandle);
 
-    mandrel::log("IDirect3DDevice9::CreateVertexBuffer called {}", static_cast<void *>(*ppVertexBuffer));
+    mandrel::log("IDirect3DDevice9::CreateVertexBuffer called {} [{}]", static_cast<void *>(*ppVertexBuffer), res);
 
     com_hook.add_hook<2zu>(*ppVertexBuffer, IDirect3DVertexBuffer9_Release_hook);
 
@@ -263,7 +343,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::ULONG WINAPI IDirect3DIndexBuffer9_Release_hook(::PROC orig_func, void *that)
+__declspec(dllexport) ::ULONG WINAPI IDirect3DIndexBuffer9_Release_hook(::PROC orig_func, void *that)
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DIndexBuffer9_Release_hook)>::type;
 
@@ -280,7 +360,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::HRESULT WINAPI IDirect3DDevice9_CreateIndexBuffer_hook(
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateIndexBuffer_hook(
     ::PROC orig_func,
     void *that,
     ::UINT Length,
@@ -295,7 +375,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     const auto res =
         reinterpret_cast<orig_call_type>(orig_func)(that, Length, Usage, Format, Pool, ppIndexBuffer, pSharedHandle);
 
-    mandrel::log("IDirect3DDevice9::CreateIndexBuffer called {}", static_cast<void *>(*ppIndexBuffer));
+    mandrel::log("IDirect3DDevice9::CreateIndexBuffer called {} [{}]", static_cast<void *>(*ppIndexBuffer), res);
 
     com_hook.add_hook<2zu>(*ppIndexBuffer, IDirect3DIndexBuffer9_Release_hook);
 
@@ -304,7 +384,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::ULONG WINAPI IDirect3DTexture9_Release_hook(::PROC orig_func, void *that)
+__declspec(dllexport) ::ULONG WINAPI IDirect3DTexture9_Release_hook(::PROC orig_func, void *that)
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DTexture9_Release_hook)>::type;
 
@@ -321,7 +401,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
     ::PROC orig_func,
     void *that,
     ::UINT Width,
@@ -335,10 +415,12 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateTexture_hook)>::type;
 
+    Pool = ::D3DPOOL::D3DPOOL_DEFAULT;
+
     const auto res = reinterpret_cast<orig_call_type>(
         orig_func)(that, Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
 
-    mandrel::log("IDirect3DDevice9::CreateTexture called {}", static_cast<void *>(*ppTexture));
+    mandrel::log("IDirect3DDevice9::CreateTexture called {} [{}]", static_cast<void *>(*ppTexture), res);
 
     if (res == S_OK && *ppTexture != nullptr)
     {
@@ -346,10 +428,19 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
         com_hook.add_hook<2zu>(*ppTexture, IDirect3DTexture9_Release_hook);
     }
 
+    if (res == E_OUTOFMEMORY)
+    {
+        mandrel::log(
+            "IDirect3DDevice9::CreateTexture failed with out of memory {} {} {}",
+            Width,
+            Height,
+            std::to_underlying(Pool));
+    }
+
     return res;
 }
 
-::HRESULT WINAPI IDirect3DStateBlock9_Release_hook(::PROC orig_func, void *that)
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DStateBlock9_Release_hook(::PROC orig_func, void *that)
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DStateBlock9_Release_hook)>::type;
 
@@ -366,7 +457,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::HRESULT WINAPI IDirect3DDevice9_CreateStateBlock_hook(
+__declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateStateBlock_hook(
     ::PROC orig_func,
     void *that,
     ::D3DSTATEBLOCKTYPE Type,
@@ -376,7 +467,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
 
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(that, Type, ppSB);
 
-    mandrel::log("IDirect3DDevice9::CreateStateBlock called {}", static_cast<void *>(*ppSB));
+    mandrel::log("IDirect3DDevice9::CreateStateBlock called {} [{}]", static_cast<void *>(*ppSB), res);
 
     com_hook.add_hook<2zu>(*ppSB, IDirect3DStateBlock9_Release_hook);
 
@@ -385,7 +476,7 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     return res;
 }
 
-::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
+__declspec(dllexport) ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
     ::PROC orig_func,
     void *that,
     ::UINT Adapter,
@@ -397,8 +488,6 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3D9_CreateDevice_hook)>::type;
 
-    mandrel::log("IDirect3D9::CreateDevice called");
-
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(
         that, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
 
@@ -409,9 +498,9 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
     com_hook.add_hook<60zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_CreateStateBlock_hook);
     com_hook.add_hook<100zu>(*ppReturnedDeviceInterface, IDirect3DDevice9_SetStreamSource_hook);
 
-    return res;
-}
+    mandrel::log("IDirect3D9::CreateDevice called {} [{}]", static_cast<void *>(*ppReturnedDeviceInterface), res);
 
+    return res;
 }
 
 extern "C"
