@@ -154,9 +154,48 @@ auto tracked_state_blocks = mandrel::ResourceTracker<void *>{};
         std::numeric_limits<float>::max(),
         ::ImVec2(0, 80.0f));
 
+    static auto vb_count_samples = mandrel::Vector<float>(1000u);
+    vb_count_samples.erase(std::ranges::begin(vb_count_samples));
+    vb_count_samples.push_back(static_cast<float>(tracked_vertex_buffers.live_count()));
     ::ImGui::Text("live vertex buffers: %zu", tracked_vertex_buffers.live_count());
+    ::ImGui::PlotLines(
+        "vertex buffer count",
+        vb_count_samples.data(),
+        vb_count_samples.size(),
+        0,
+        nullptr,
+        0.0f,
+        static_cast<float>(std::max<std::size_t>(tracked_vertex_buffers.live_count(), 100u)),
+        ::ImVec2(0, 80.0f));
+
+    static auto ib_count_samples = mandrel::Vector<float>(1000u);
+    ib_count_samples.erase(std::ranges::begin(ib_count_samples));
+    ib_count_samples.push_back(static_cast<float>(tracked_index_buffers.live_count()));
     ::ImGui::Text("live index buffers: %zu", tracked_index_buffers.live_count());
+    ::ImGui::PlotLines(
+        "index buffer count",
+        ib_count_samples.data(),
+        ib_count_samples.size(),
+        0,
+        nullptr,
+        0.0f,
+        static_cast<float>(std::max<std::size_t>(tracked_index_buffers.live_count(), 100u)),
+        ::ImVec2(0, 80.0f));
+
+    static auto texture_count_samples = mandrel::Vector<float>(1000u);
+    texture_count_samples.erase(std::ranges::begin(texture_count_samples));
+    texture_count_samples.push_back(static_cast<float>(tracked_textures.live_count()));
     ::ImGui::Text("live textures: %zu", tracked_textures.live_count());
+    ::ImGui::PlotLines(
+        "texture count",
+        texture_count_samples.data(),
+        texture_count_samples.size(),
+        0,
+        nullptr,
+        0.0f,
+        static_cast<float>(std::max<std::size_t>(tracked_textures.live_count(), 100u)),
+        ::ImVec2(0, 80.0f));
+
     ::ImGui::Text("live state blocks: %zu", tracked_state_blocks.live_count());
 
     ::ImGui::End();
