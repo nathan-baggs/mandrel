@@ -415,8 +415,6 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
 {
     using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateTexture_hook)>::type;
 
-    Pool = ::D3DPOOL::D3DPOOL_DEFAULT;
-
     const auto res = reinterpret_cast<orig_call_type>(
         orig_func)(that, Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
 
