@@ -90,11 +90,14 @@ auto largest_free_page() -> std::size_t
 template <class F>
 struct OrigFunc;
 
-template <class R, class H, class... Tail>
-struct OrigFunc<R(WINAPI *)(H, Tail...)>
+template <class R, class Head, class... Tail>
+struct OrigFunc<R(WINAPI *)(Head, Tail...)>
 {
     using type = R(WINAPI *)(Tail...);
 };
+
+template <class F>
+using OrigFuncType = OrigFunc<F>::type;
 
 auto com_hook = mandrel::COMHook{};
 auto orig_wind_proc = ::WNDPROC{};
@@ -173,7 +176,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
 
 __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_EndScene_Hook(::PROC orig_func, void *that)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_EndScene_Hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DDevice9_EndScene_Hook)>;
 
     [[maybe_unused]] static auto initialised = [that]()
     {
@@ -299,7 +302,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_SetStreamSource_hook(
     ::UINT OffsetInBytes,
     ::UINT Stride)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_SetStreamSource_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DDevice9_SetStreamSource_hook)>;
 
     return reinterpret_cast<orig_call_type>(orig_func)(that, StreamNumber, pStreamData, OffsetInBytes, Stride);
 }
@@ -329,7 +332,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateVertexBuffer_hook(
     ::IDirect3DVertexBuffer9 **ppVertexBuffer,
     ::HANDLE *pSharedHandle)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateVertexBuffer_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DDevice9_CreateVertexBuffer_hook)>;
 
     const auto res =
         reinterpret_cast<orig_call_type>(orig_func)(that, Length, Usage, FVF, Pool, ppVertexBuffer, pSharedHandle);
@@ -345,7 +348,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateVertexBuffer_hook(
 
 __declspec(dllexport) ::ULONG WINAPI IDirect3DIndexBuffer9_Release_hook(::PROC orig_func, void *that)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DIndexBuffer9_Release_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DIndexBuffer9_Release_hook)>;
 
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
 
@@ -370,7 +373,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateIndexBuffer_hook(
     ::IDirect3DIndexBuffer9 **ppIndexBuffer,
     ::HANDLE *pSharedHandle)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateIndexBuffer_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DDevice9_CreateIndexBuffer_hook)>;
 
     const auto res =
         reinterpret_cast<orig_call_type>(orig_func)(that, Length, Usage, Format, Pool, ppIndexBuffer, pSharedHandle);
@@ -386,7 +389,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateIndexBuffer_hook(
 
 __declspec(dllexport) ::ULONG WINAPI IDirect3DTexture9_Release_hook(::PROC orig_func, void *that)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DTexture9_Release_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DTexture9_Release_hook)>;
 
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
 
@@ -413,7 +416,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
     ::IDirect3DTexture9 **ppTexture,
     ::HANDLE *pSharedHandle)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateTexture_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DDevice9_CreateTexture_hook)>;
 
     const auto res = reinterpret_cast<orig_call_type>(
         orig_func)(that, Width, Height, Levels, Usage, Format, Pool, ppTexture, pSharedHandle);
@@ -440,7 +443,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateTexture_hook(
 
 __declspec(dllexport) ::HRESULT WINAPI IDirect3DStateBlock9_Release_hook(::PROC orig_func, void *that)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DStateBlock9_Release_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DStateBlock9_Release_hook)>;
 
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(that);
 
@@ -461,7 +464,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3DDevice9_CreateStateBlock_hook(
     ::D3DSTATEBLOCKTYPE Type,
     ::IDirect3DStateBlock9 **ppSB)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3DDevice9_CreateStateBlock_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3DDevice9_CreateStateBlock_hook)>;
 
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(that, Type, ppSB);
 
@@ -484,7 +487,7 @@ __declspec(dllexport) ::HRESULT WINAPI IDirect3D9_CreateDevice_hook(
     ::D3DPRESENT_PARAMETERS *pPresentationParameters,
     ::IDirect3DDevice9 **ppReturnedDeviceInterface)
 {
-    using orig_call_type = OrigFunc<decltype(&IDirect3D9_CreateDevice_hook)>::type;
+    using orig_call_type = OrigFuncType<decltype(&IDirect3D9_CreateDevice_hook)>;
 
     const auto res = reinterpret_cast<orig_call_type>(orig_func)(
         that, Adapter, DeviceType, hFocusWindow, BehaviorFlags, pPresentationParameters, ppReturnedDeviceInterface);
